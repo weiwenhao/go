@@ -89,6 +89,7 @@ func allocmcache() *mcache {
 		c.flushGen = mheap_.sweepgen
 		unlock(&mheap_.lock)
 	})
+	// c.alloc 中包含 138 个 mspan
 	for i := range c.alloc {
 		c.alloc[i] = &emptymspan
 	}
@@ -143,13 +144,15 @@ func getMCache(mp *m) *mcache {
 //
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
+// 为 mcache 插入缓存的唯一方法
 func (c *mcache) refill(spc spanClass) {
 	// Return the current cached span to the central lists.
-	s := c.alloc[spc]
+	s := c.alloc[spc] // c.alloc 是一个数组，包含各种 span size class?
 
 	if uintptr(s.allocCount) != s.nelems {
 		throw("refill of span with free space remaining")
 	}
+
 	if s != &emptymspan {
 		// Mark this span as no longer cached.
 		if s.sweepgen != mheap_.sweepgen+3 {
@@ -191,7 +194,7 @@ func (c *mcache) refill(spc spanClass) {
 	gcController.update(int64(s.npages*pageSize)-int64(usedBytes), int64(c.scanAlloc))
 	c.scanAlloc = 0
 
-	c.alloc[spc] = s
+	c.alloc[spc] = s // 赋值？
 }
 
 // allocLarge allocates a span for a large object.

@@ -992,11 +992,12 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	}
 	var span *mspan
 	var x unsafe.Pointer
-	noscan := typ == nil || typ.ptrdata == 0
+	noscan := typ == nil || typ.ptrdata == 0 // noscan 表示不需要被垃圾回收骚年
 	// In some cases block zeroing can profitably (for latency reduction purposes)
 	// be delayed till preemption is possible; delayedZeroing tracks that state.
 	delayedZeroing := false
 	if size <= maxSmallSize {
+		// 微对象分配只接收非指针类型的数据
 		if noscan && size < maxTinySize {
 			// Tiny allocator.
 			//
@@ -1071,22 +1072,23 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			}
 			size = maxTinySize
 		} else {
+			// 小对象分配, 根据 size 进行取正
 			var sizeclass uint8
 			if size <= smallSizeMax-8 {
 				sizeclass = size_to_class8[divRoundUp(size, smallSizeDiv)]
 			} else {
 				sizeclass = size_to_class128[divRoundUp(size-smallSizeMax, largeSizeDiv)]
 			}
-			size = uintptr(class_to_size[sizeclass])
-			spc := makeSpanClass(sizeclass, noscan)
-			span = c.alloc[spc]
-			v := nextFreeFast(span)
-			if v == 0 {
-				v, span, shouldhelpgc = c.nextFree(spc)
+			size = uintptr(class_to_size[sizeclass]) // span 中每个 object 的大小
+			spc := makeSpanClass(sizeclass, noscan)  // spc = spanclass
+			span = c.alloc[spc]                      // 定位 span
+			v := nextFreeFast(span)                  // 直接定位 span 下一个空闲的位置
+			if v == 0 {                              // 不空闲
+				v, span, shouldhelpgc = c.nextFree(spc) // c ==  mcache, mcache 的 next free?
 			}
-			x = unsafe.Pointer(v)
+			x = unsafe.Pointer(v) // 空闲！ but 这里分配了一个啥？分配的尺寸会浪费吗？ 会
 			if needzero && span.needzero != 0 {
-				memclrNoHeapPointers(unsafe.Pointer(v), size)
+				memclrNoHeapPointers(unsafe.Pointer(v), size) // set zero!
 			}
 		}
 	} else {

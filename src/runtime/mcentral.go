@@ -25,7 +25,7 @@ type mcentral struct {
 	// roles on each GC cycle. The unswept set is drained either by
 	// allocation or by the background sweeper in every GC cycle,
 	// so only two roles are necessary.
-	//
+	// [2]spanset 主要是为了 gc 考虑
 	// sweepgen is increased by 2 on each GC cycle, so the swept
 	// spans are in partial[sweepgen/2%2] and the unswept spans are in
 	// partial[1-sweepgen/2%2]. Sweeping pops spans from the
@@ -38,8 +38,9 @@ type mcentral struct {
 	// to the appropriate swept list. As a result, the parts of the
 	// sweeper and mcentral that do consume from the unswept list may
 	// encounter swept spans, and these should be ignored.
-	partial [2]spanSet // list of spans with a free object
-	full    [2]spanSet // list of spans with no free objects
+	// 为什么要包含两个 span 即可？
+	partial [2]spanSet // list of spans with a free object  // 包含空闲的 object 的 span?
+	full    [2]spanSet // list of spans with no free objects  // 全部用满 object 的 span 集合？
 }
 
 // Initialize a single central free list.
@@ -78,6 +79,8 @@ func (c *mcentral) fullSwept(sweepgen uint32) *spanSet {
 // Allocate a span to use in an mcache.
 func (c *mcentral) cacheSpan() *mspan {
 	// Deduct credit for this span allocation and sweep if necessary.
+	// 根据 size class 选择合适的 pages 的大小, 同一个 size class 下的 pages 大小是确定的(8k 的 倍数)
+	// 这里的 span pages 值得是单个 span 中包含的内存数量
 	spanBytes := uintptr(class_to_allocnpages[c.spanclass.sizeclass()]) * _PageSize
 	deductSweepCredit(spanBytes, 0)
 
@@ -106,7 +109,7 @@ func (c *mcentral) cacheSpan() *mspan {
 
 	// Try partial swept spans first.
 	sg := mheap_.sweepgen
-	if s = c.partialSwept(sg).pop(); s != nil {
+	if s = c.partialSwept(sg).pop(); s != nil { // 包含空闲的 paritial span
 		goto havespan
 	}
 
@@ -161,6 +164,7 @@ func (c *mcentral) cacheSpan() *mspan {
 	}
 
 	// We failed to get a span from the mcentral so get one from mheap.
+	// mcentral 中已经没有可用的 span 了，从 mheap 中申请咯
 	s = c.grow()
 	if s == nil {
 		return nil
@@ -178,7 +182,7 @@ havespan:
 	freeByteBase := s.freeindex &^ (64 - 1)
 	whichByte := freeByteBase / 8
 	// Init alloc bits cache.
-	s.refillAllocCache(whichByte)
+	s.refillAllocCache(whichByte) // span 就像纽带？
 
 	// Adjust the allocCache so that s.freeindex corresponds to the low bit in
 	// s.allocCache.
