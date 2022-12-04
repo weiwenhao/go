@@ -846,18 +846,28 @@ var zerobase uintptr
 
 // nextFreeFast returns the next free object if one is quickly available.
 // Otherwise it returns 0.
+// 目前来看，内存的分配特别的顺序，但是 freeindex 考虑到了不空闲的情况
 func nextFreeFast(s *mspan) gclinkptr {
+	// s.allocCache 缓存了 freeindex 算起的最近 64个 objects 的 bitmap 情况。
+	// alloc bit 中，0 表示已使用，1表示空闲。
+	// allocCache 则为补码， 1 表示已使用， 0 表示空闲
+	// 所以通常的结构就是 free_index, 1, 1, 1, 0, 0, 0, 0
+	// 通过 ctz64 可以快速定位到第 3 位是最后一个被使用的位置，之后都是空闲的位置
+	// allocCache 只缓存了 freeindex 64 位的内存情况, 并不能反应整个 span 的 object 的空闲情况
 	theBit := sys.Ctz64(s.allocCache) // Is there a free object in the allocCache?
-	if theBit < 64 {
-		result := s.freeindex + uintptr(theBit)
-		if result < s.nelems {
-			freeidx := result + 1
+	if theBit < 64 {                  // 还有空闲的位置
+		result := s.freeindex + uintptr(theBit) // 定位空闲的 index
+		if result < s.nelems {                  // 还是有可能超出的
+			freeidx := result + 1 // 计算新的 freeindex, 指向待分配的 slot 的下一个 object
+			// %64 == 0, 表示??
 			if freeidx%64 == 0 && freeidx != s.nelems {
 				return 0
 			}
-			s.allocCache >>= uint(theBit + 1)
+			// 这里不有必要吗？
+			s.allocCache = s.allocCache >> uint(theBit+1) // 右移动一位
 			s.freeindex = freeidx
 			s.allocCount++
+			// 这里计算了实际的地址，而不是使用索引？
 			return gclinkptr(result*s.elemsize + s.base())
 		}
 	}
@@ -874,15 +884,17 @@ func nextFreeFast(s *mspan) gclinkptr {
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
 func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bool) {
-	s = c.alloc[spc]
+	s = c.alloc[spc] // span
 	shouldhelpgc = false
 	freeIndex := s.nextFreeIndex()
-	if freeIndex == s.nelems {
+	if freeIndex == s.nelems { // 真的已经满了(由于没有回头，所以其实可能还是有一点空间的？)
 		// The span is full.
 		if uintptr(s.allocCount) != s.nelems {
 			println("runtime: s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
 			throw("s.allocCount != s.nelems && freeIndex == s.nelems")
 		}
+
+		// 从 mcentral 找咯
 		c.refill(spc)
 		shouldhelpgc = true
 		s = c.alloc[spc]
@@ -1055,7 +1067,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				return x
 			}
 			// Allocate a new maxTinySize block.
-			span = c.alloc[tinySpanClass]
+			span = c.alloc[tinySpanClass] // 重新填满 tiny span
 			v := nextFreeFast(span)
 			if v == 0 {
 				v, span, shouldhelpgc = c.nextFree(tinySpanClass)
@@ -1084,6 +1096,8 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			span = c.alloc[spc]                      // 定位 span
 			v := nextFreeFast(span)                  // 直接定位 span 下一个空闲的位置
 			if v == 0 {                              // 不空闲
+				// next free fast 依赖了 allocCache ，只能判断 64 个位置
+				// 对 span 进行了二次复制
 				v, span, shouldhelpgc = c.nextFree(spc) // c ==  mcache, mcache 的 next free?
 			}
 			x = unsafe.Pointer(v) // 空闲！ but 这里分配了一个啥？分配的尺寸会浪费吗？ 会

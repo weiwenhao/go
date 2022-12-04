@@ -146,7 +146,10 @@ func (s *mspan) allocBitsForIndex(allocBitIndex uintptr) markBits {
 // and negates them so that ctz (count trailing zeros) instructions
 // can be used. It then places these 8 bytes into the cached 64 bit
 // s.allocCache.
+// 从 whichByte 开始从新缓存呗就是
 func (s *mspan) refillAllocCache(whichByte uintptr) {
+	// bitmap
+	// free_index = 64 / 8 =  8, 指针的移动和 c 一样，这里需要 uint8 类型偏移 8次，等同于 64 个字节, 也就是第 64 个bitmap 位
 	bytes := (*[8]uint8)(unsafe.Pointer(s.allocBits.bytep(whichByte)))
 	aCache := uint64(0)
 	aCache |= uint64(bytes[0])
@@ -161,14 +164,14 @@ func (s *mspan) refillAllocCache(whichByte uintptr) {
 }
 
 // nextFreeIndex returns the index of the next free object in s at
-// or after s.freeindex.
+// or after s.freeindex. 返回 next free 之后的空闲的的 s.nelems index
 // There are hardware instructions that can be used to make this
 // faster if profiling warrants it.
 func (s *mspan) nextFreeIndex() uintptr {
 	sfreeindex := s.freeindex
 	snelems := s.nelems
 	if sfreeindex == snelems {
-		return sfreeindex
+		return sfreeindex // 这样返回则表示 span full
 	}
 	if sfreeindex > snelems {
 		throw("s.freeindex > s.nelems")
@@ -177,10 +180,14 @@ func (s *mspan) nextFreeIndex() uintptr {
 	aCache := s.allocCache
 
 	bitIndex := sys.Ctz64(aCache)
-	for bitIndex == 64 {
+	// 经过 free, bitIndex 必定 == 64
+	for bitIndex == 64 { // == 64 表示没有 free index 了
 		// Move index to start of next cached bits.
+		// 按 64 的倍数来算
+		// (sfreeindex + 64) -= (% 64)
 		sfreeindex = (sfreeindex + 64) &^ (64 - 1)
-		if sfreeindex >= snelems {
+
+		if sfreeindex >= snelems { // 以满！不回头
 			s.freeindex = snelems
 			return snelems
 		}
@@ -188,10 +195,11 @@ func (s *mspan) nextFreeIndex() uintptr {
 		// Refill s.allocCache with the next 64 alloc bits.
 		s.refillAllocCache(whichByte)
 		aCache = s.allocCache
-		bitIndex = sys.Ctz64(aCache)
+		bitIndex = sys.Ctz64(aCache) // 继续找找找
 		// nothing available in cached bits
 		// grab the next 8 bytes and try again.
 	}
+
 	result := sfreeindex + uintptr(bitIndex)
 	if result >= snelems {
 		s.freeindex = snelems

@@ -153,15 +153,19 @@ func (c *mcache) refill(spc spanClass) {
 		throw("refill of span with free space remaining")
 	}
 
+	// s 已经是分配过的？此时可以已经满载了
 	if s != &emptymspan {
 		// Mark this span as no longer cached.
 		if s.sweepgen != mheap_.sweepgen+3 {
 			throw("bad sweepgen in refill")
 		}
+		// 先回收上一个 span（其空间都被申请出去了，所以具体怎么回收就无从而知了, 总之就是归还到 mcentrl 的 partial/full span set 中
+		// 回收到 partial 表示 spc 对应的 span 其实还有一点空余的位置，但是为啥不用，就无从而知了？
 		mheap_.central[spc].mcentral.uncacheSpan(s)
 	}
 
 	// Get a new cached span from the central lists.
+	// 获取一个新的 span
 	s = mheap_.central[spc].mcentral.cacheSpan()
 	if s == nil {
 		throw("out of memory")
@@ -194,7 +198,7 @@ func (c *mcache) refill(spc spanClass) {
 	gcController.update(int64(s.npages*pageSize)-int64(usedBytes), int64(c.scanAlloc))
 	c.scanAlloc = 0
 
-	c.alloc[spc] = s // 赋值？
+	c.alloc[spc] = s // 直接替换？ 那原来的 span 呢？
 }
 
 // allocLarge allocates a span for a large object.

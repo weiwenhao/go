@@ -498,6 +498,8 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	// The allocBits indicate which unmarked objects don't need to be
 	// processed since they were free at the end of the last GC cycle
 	// and were not allocated since then.
+	// allocBits 指示哪些 object 不需要被处理
+
 	// If the allocBits index is >= s.freeindex and the bit
 	// is not marked then the object remains unallocated
 	// since the last GC.
@@ -612,8 +614,9 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	}
 
 	// Count the number of free objects in this span.
-	nalloc := uint16(s.countAlloc())
-	nfreed := s.allocCount - nalloc
+	// 统计当前 span 中所有的 free objects
+	nalloc := uint16(s.countAlloc()) // 计算经过 gc mark 后，实际还在使用的 object 的数量
+	nfreed := s.allocCount - nalloc  // 需要释放的 object 的数量
 	if nalloc > s.allocCount {
 		// The zombie check above should have caught this in
 		// more detail.
@@ -622,7 +625,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	}
 
 	s.allocCount = nalloc
-	s.freeindex = 0 // reset allocation index to start of span.
+	s.freeindex = 0 // reset allocation index to start of span., 从 0 开始！
 	if trace.enabled {
 		getg().m.p.ptr().traceReclaimed += uintptr(nfreed) * s.elemsize
 	}
@@ -675,13 +678,16 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 			// sweeping by updating sweepgen. If this span still is in
 			// an unswept set, then the mcentral will pop it off the
 			// set, check its sweepgen, and ignore it.
-			if nalloc == 0 {
+			if nalloc == 0 { // 整个 span 目前已经被清空咯
 				// Free totally free span directly back to the heap.
-				mheap_.freeSpan(s)
+				mheap_.freeSpan(s) // 立即回到 mheap 中。
 				return true
 			}
+
 			// Return span back to the right mcentral list.
+			// 归还到 mcentral
 			if uintptr(nalloc) == s.nelems {
+				// 满载 span
 				mheap_.central[spc].mcentral.fullSwept(sweepgen).push(s)
 			} else {
 				mheap_.central[spc].mcentral.partialSwept(sweepgen).push(s)

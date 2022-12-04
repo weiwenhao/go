@@ -1946,7 +1946,7 @@ type gcBits uint8
 
 // bytep returns a pointer to the n'th byte of b.
 func (b *gcBits) bytep(n uintptr) *uint8 {
-	return addb((*uint8)(b), n)
+	return addb((*uint8)(b), n) // 和 c 一样uint8 + 1 就是移动 8位
 }
 
 // bitp returns a pointer to the byte containing bit n and a mask for

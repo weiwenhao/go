@@ -108,11 +108,13 @@ func (c *mcentral) cacheSpan() *mspan {
 	var sl sweepLocker
 
 	// Try partial swept spans first.
+	// 如果在 mcentral partial 中找到了就直接返回
 	sg := mheap_.sweepgen
 	if s = c.partialSwept(sg).pop(); s != nil { // 包含空闲的 paritial span
 		goto havespan
 	}
 
+	// mheap grow 罗技咯
 	sl = sweep.active.begin()
 	if sl.valid {
 		// Now try partial unswept spans.
@@ -175,7 +177,7 @@ havespan:
 	if trace.enabled && !traceDone {
 		traceGCSweepDone()
 	}
-	n := int(s.nelems) - int(s.allocCount)
+	n := int(s.nelems) - int(s.allocCount) // 重复判断一下是否有空闲的位置
 	if n == 0 || s.freeindex == s.nelems || uintptr(s.allocCount) == s.nelems {
 		throw("span has no free objects")
 	}
@@ -201,6 +203,7 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 	}
 
 	sg := mheap_.sweepgen
+	//  the span was cached before sweep began and is still cached, and needs sweeping
 	stale := s.sweepgen == sg+1
 
 	// Fix up sweepgen.
@@ -229,6 +232,7 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 		ss := sweepLocked{s}
 		ss.sweep(false)
 	} else {
+		// 回收上一个 span!
 		if int(s.nelems)-int(s.allocCount) > 0 {
 			// Put it back on the partial swept list.
 			c.partialSwept(sg).push(s)
