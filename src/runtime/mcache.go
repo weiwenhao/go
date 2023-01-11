@@ -154,13 +154,16 @@ func (c *mcache) refill(spc spanClass) {
 	}
 
 	// s 已经是分配过的？此时可以已经满载了
-	if s != &emptymspan {
+	// c.alloc[spc] 当前的 span 需要进行一个简单的收回
+	if s != &emptymspan { // 如果
 		// Mark this span as no longer cached.
 		if s.sweepgen != mheap_.sweepgen+3 {
 			throw("bad sweepgen in refill")
 		}
+
 		// 先回收上一个 span（其空间都被申请出去了，所以具体怎么回收就无从而知了, 总之就是归还到 mcentrl 的 partial/full span set 中
 		// 回收到 partial 表示 spc 对应的 span 其实还有一点空余的位置，但是为啥不用，就无从而知了？
+		// 被 hold 期间是不会进行 sweep 的，所以此时肯定没有空位了，直接 uncache 就行咯
 		mheap_.central[spc].mcentral.uncacheSpan(s)
 	}
 

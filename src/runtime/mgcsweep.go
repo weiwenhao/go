@@ -223,7 +223,7 @@ func (a *activeSweep) reset() {
 }
 
 // finishsweep_m ensures that all spans are swept.
-//
+// 确保所有的 span 都被扫描咯
 // The world must be stopped. This ensures there are no sweeps in
 // progress.
 //
@@ -468,18 +468,21 @@ func (s *mspan) ensureSwept() {
 func (sl *sweepLocked) sweep(preserve bool) bool {
 	// It's critical that we enter this function with preemption disabled,
 	// GC must not start while we are in the middle of this function.
+	// 获取当前 gorouting
 	_g_ := getg()
 	if _g_.m.locks == 0 && _g_.m.mallocing == 0 && _g_ != _g_.m.g0 {
 		throw("mspan.sweep: m is not locked")
 	}
 
-	s := sl.mspan
+	s := sl.mspan // span 这不就来了
 	if !preserve {
 		// We'll release ownership of this span. Nil it out to
 		// prevent the caller from accidentally using it.
+		// 我们将释放这个span的所有权。空值以防止调用者意外使用它。
 		sl.mspan = nil
 	}
 
+	// sweepgen 表示当前的 gc 阶段
 	sweepgen := mheap_.sweepgen
 	if state := s.state.get(); state != mSpanInUse || s.sweepgen != sweepgen-1 {
 		print("mspan.sweep: state=", state, " sweepgen=", s.sweepgen, " mheap.sweepgen=", sweepgen, "\n")
@@ -492,8 +495,9 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 
 	mheap_.pagesSwept.Add(int64(s.npages))
 
+	// 前 7位保存 class 类型， 最后一位表示是否包含指针
 	spc := s.spanclass
-	size := s.elemsize
+	size := s.elemsize // 从 span 拆分(或者组合)的 obj 的大小，单位 bytes, 可以根据 sizeclass 类查到
 
 	// The allocBits indicate which unmarked objects don't need to be
 	// processed since they were free at the end of the last GC cycle

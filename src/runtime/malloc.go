@@ -886,8 +886,8 @@ func nextFreeFast(s *mspan) gclinkptr {
 func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bool) {
 	s = c.alloc[spc] // span
 	shouldhelpgc = false
-	freeIndex := s.nextFreeIndex()
-	if freeIndex == s.nelems { // 真的已经满了(由于没有回头，所以其实可能还是有一点空间的？)
+	freeIndex := s.nextFreeIndex() // span 全局遍历
+	if freeIndex == s.nelems {     // 真的已经满了(由于没有回头，所以其实可能还是有一点空间的？)
 		// The span is full.
 		if uintptr(s.allocCount) != s.nelems {
 			println("runtime: s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
@@ -1100,7 +1100,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				// 对 span 进行了二次复制
 				v, span, shouldhelpgc = c.nextFree(spc) // c ==  mcache, mcache 的 next free?
 			}
-			x = unsafe.Pointer(v) // 空闲！ but 这里分配了一个啥？分配的尺寸会浪费吗？ 会
+			x = unsafe.Pointer(v)
 			if needzero && span.needzero != 0 {
 				memclrNoHeapPointers(unsafe.Pointer(v), size) // set zero!
 			}

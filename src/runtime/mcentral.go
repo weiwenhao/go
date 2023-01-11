@@ -60,6 +60,7 @@ func (c *mcentral) partialUnswept(sweepgen uint32) *spanSet {
 
 // partialSwept returns the spanSet which holds partially-filled
 // swept spans for this sweepgen.
+// 读取已经 swept 的 span
 func (c *mcentral) partialSwept(sweepgen uint32) *spanSet {
 	return &c.partial[sweepgen/2%2]
 }
@@ -109,12 +110,14 @@ func (c *mcentral) cacheSpan() *mspan {
 
 	// Try partial swept spans first.
 	// 如果在 mcentral partial 中找到了就直接返回
+	// sg == sweepgen 表示当前轮的 gc 已经完成
 	sg := mheap_.sweepgen
+	// 如果 mcentral 中有已经清扫过的 swept, 直接使用
 	if s = c.partialSwept(sg).pop(); s != nil { // 包含空闲的 paritial span
 		goto havespan
 	}
 
-	// mheap grow 罗技咯
+	// mheap grow 逻辑
 	sl = sweep.active.begin()
 	if sl.valid {
 		// Now try partial unswept spans.
@@ -173,18 +176,19 @@ func (c *mcentral) cacheSpan() *mspan {
 	}
 
 	// At this point s is a span that should have free slots.
+	// 变量 s 引用的 span 有空闲的 slot
 havespan:
 	if trace.enabled && !traceDone {
 		traceGCSweepDone()
 	}
-	n := int(s.nelems) - int(s.allocCount) // 重复判断一下是否有空闲的位置
+	n := int(s.nelems) - int(s.allocCount) // 重复判断一下是否有空闲的位置,没有就是有异常
 	if n == 0 || s.freeindex == s.nelems || uintptr(s.allocCount) == s.nelems {
 		throw("span has no free objects")
 	}
 	freeByteBase := s.freeindex &^ (64 - 1)
 	whichByte := freeByteBase / 8
 	// Init alloc bits cache.
-	s.refillAllocCache(whichByte) // span 就像纽带？
+	s.refillAllocCache(whichByte)
 
 	// Adjust the allocCache so that s.freeindex corresponds to the low bit in
 	// s.allocCache.
@@ -202,8 +206,23 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 		throw("uncaching span but s.allocCount == 0")
 	}
 
+	// 判断当前 span 的 gc 状态
+	// 每进行一轮 gc, sweepgen 的值就 + 2， 通过该值能够判断每一个 span 的当前处于 gc 的哪一个阶段
 	sg := mheap_.sweepgen
 	//  the span was cached before sweep began and is still cached, and needs sweeping
+	// sweep generation:
+	// if sweepgen == h->sweepgen - 2, the span needs sweeping // 需要 gc
+	// if sweepgen == h->sweepgen - 1, the span is currently being swept // span 正在进行 gc
+	// if sweepgen == h->sweepgen, the span is swept and ready to use // 已经 gc 扫描了所有的 object，并且 span 可以被使用。 被谁使用？
+
+	// span 被 mcache 使用，现在仍然被 mcache 持有，需要 swepping
+	// if sweepgen == h->sweepgen + 1, the span was cached before sweep began and is still cached, and needs sweeping
+
+	// span 被 swept 之后被 mcache 缓存，现在仍然被 cached
+	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
+	// h->sweepgen is incremented by 2 after every GC
+
+	// 当前 span 被 mcache 持有，需要 sweep
 	stale := s.sweepgen == sg+1
 
 	// Fix up sweepgen.
@@ -214,10 +233,10 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 		// Set sweepgen to indicate it's not cached but needs
 		// sweeping and can't be allocated from. sweep will
 		// set s.sweepgen to indicate s is swept.
-		atomic.Store(&s.sweepgen, sg-1)
+		atomic.Store(&s.sweepgen, sg-1) // - 1 就是正在进行 gc
 	} else {
 		// Indicate that s is no longer cached.
-		atomic.Store(&s.sweepgen, sg)
+		atomic.Store(&s.sweepgen, sg) // 当前 span 已经被 gc 扫过了，扫过了就说明真的没有空余的 span 了，立刻 uncache span 吧
 	}
 
 	// Put the span in the appropriate place.
@@ -229,14 +248,16 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 		// aren't in the global sweep lists, so mark termination
 		// itself holds up sweep completion until all mcaches
 		// have been swept.
-		ss := sweepLocked{s}
-		ss.sweep(false)
+		ss := sweepLocked{s} // 包裹起来进行 sweep
+		ss.sweep(false)      // 上一步已经锁住了，现在开始进行 gc 咯
 	} else {
-		// 回收上一个 span!
+		// 让 span 回归到 mcentral 的管理中
 		if int(s.nelems)-int(s.allocCount) > 0 {
+			// 虽然不知道为啥，但是目前还是有一定的空余的！为啥会有空余？被 mcache 持有的 span 难道也有 sweep?
 			// Put it back on the partial swept list.
 			c.partialSwept(sg).push(s)
 		} else {
+			// 完全没有空余咯
 			// There's no free space and it's not stale, so put it on the
 			// full swept list.
 			c.fullSwept(sg).push(s)

@@ -1128,7 +1128,7 @@ func gcBgMarkStartWorkers() {
 	// Worker Gs don't exit if gomaxprocs is reduced. If it is raised
 	// again, we can reuse the old workers; no need to create new workers.
 	for gcBgMarkWorkerCount < gomaxprocs {
-		go gcBgMarkWorker()
+		go gcBgMarkWorker() // 这是 gc 那个线程，谁知道？？
 
 		notetsleepg(&work.bgMarkReady, -1)
 		noteclear(&work.bgMarkReady)
